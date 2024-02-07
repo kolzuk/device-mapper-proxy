@@ -152,7 +152,7 @@ void dm_dmp_exit(void)
 {
     kobject_put(stat_kobj);
     sysfs_remove_file(stat_kobj, &dmp_attr.attr);
-	dm_unregister_target(&dmp_target);
+    dm_unregister_target(&dmp_target);
 }
 
 module_init(dm_dmp_init);
