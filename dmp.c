@@ -131,10 +131,10 @@ static struct kobj_attribute dmp_attr = __ATTR(volumes, 0444, dmp_c_show, NULL);
 
 int __init dm_dmp_init(void)
 {
-	int r = dm_register_target(&dmp_target);
-
-	if (r < 0)
-		DMERR("register failed %d\n", r);
+    int r = dm_register_target(&dmp_target);
+    
+    if (r < 0)
+    DMERR("register failed %d\n", r);
 
     stat_kobj = kobject_create_and_add("stat", &THIS_MODULE->mkobj.kobj);
 
