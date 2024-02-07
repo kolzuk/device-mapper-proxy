@@ -7,66 +7,41 @@
 
 #define DM_MSG_PREFIX "dmp"
 
+struct dmp_operation_stat {
+    uint64_t reqs;
+    uint64_t total_size;
+};
+
 struct dmp_c {
     struct dm_dev *dev;
-    uint64_t count_of_read;
-    uint64_t count_of_write;
-    uint64_t read_size;
-    uint64_t write_size;
+    struct dmp_operation_stat read_op_stat;
+    struct dmp_operation_stat write_op_stat;
 };
 
 static struct dmp_c *dt;
 
 /********************Utill functions********************/
-static ssize_t get_avg_size_of_read(struct dmp_c *dt) 
+static uint64_t avg_size(uint64_t sum, uint64_t count) 
 {
-    if (dt == NULL) {
-        return -1;
-    }
-
-    if (dt->count_of_read == 0) {
+    if (count == 0) {
         return 0;
     }
 
-    return dt->read_size / dt->count_of_read;
-}
-
-static ssize_t get_avg_size_of_write(struct dmp_c *dt) {
-    if (dt == NULL) {
-        return -1;
-    }
-
-    if (dt->count_of_write == 0) {
-        return 0;
-    }
-
-    return dt->write_size / dt->count_of_write;
-}
-
-static ssize_t get_avg_size(struct dmp_c *dt) {
-    if (dt == NULL) {
-        return -1;
-    }
-
-    if (dt->count_of_read + dt->count_of_write == 0) {
-        return 0;
-    }
-
-    return (dt->read_size + dt->write_size) / (dt->count_of_read + dt->count_of_write);
+    return sum / count;
 }
 
 static void update_stats(struct bio *bio) 
 {
-    unsigned int bio_size = bio->bi_iter.bi_size + bio->bi_iter.bi_bvec_done;
+    unsigned int bio_size = bio->bi_iter.bi_size;
 
     switch (bio_op(bio)) {
         case REQ_OP_READ:
-            dt->count_of_read++;
-            dt->read_size += bio_size;
+            dt->read_op_stat.reqs++;
+            dt->read_op_stat.total_size += bio_size;
             break;
         case REQ_OP_WRITE:
-            dt->count_of_write++;
-            dt->write_size += bio_size; 
+            dt->write_op_stat.reqs++;
+            dt->write_op_stat.total_size += bio_size;
             break;
         default:
             break;
@@ -124,8 +99,6 @@ static struct target_type dmp_target = {
 };
 
 /********************Sysfs functions********************/
-static struct kobject *stats_dir;
-
 static ssize_t dmp_c_show(struct kobject *kobj, 
                         struct kobj_attribute *attr, char *buf) 
 {
@@ -133,21 +106,26 @@ static ssize_t dmp_c_show(struct kobject *kobj,
         return -1;
     }
 
+    struct dmp_operation_stat read_stat = dt->read_op_stat;
+    struct dmp_operation_stat write_stat = dt->write_op_stat;
+
     return sprintf(
         buf,
         "read:\n"
         "   regs: %llu\n"
-        "   avg size: %lli\n"
+        "   avg size: %llu\n"
         "write:\n"
         "   regs: %llu\n"
-        "   avg size: %lli\n"
+        "   avg size: %llu\n"
         "total:\n"
         "   regs: %llu\n"
-        "   avg size: %lli\n",
-        dt->count_of_read, get_avg_size_of_read(dt),
-        dt->count_of_write, get_avg_size_of_write(dt),
-        dt->count_of_read + dt->count_of_write, get_avg_size(dt));
+        "   avg size: %llu\n",
+        read_stat.reqs, avg_size(read_stat.total_size, read_stat.reqs),
+        write_stat.reqs, avg_size(write_stat.total_size, write_stat.reqs),
+        read_stat.reqs + write_stat.reqs, avg_size(read_stat.total_size + write_stat.total_size, read_stat.reqs + write_stat.reqs));
 }
+
+static struct kobject *stat_kobj;
 
 static struct kobj_attribute dmp_attr = __ATTR(volumes, 0444, dmp_c_show, NULL);
 
@@ -158,22 +136,22 @@ int __init dm_dmp_init(void)
 	if (r < 0)
 		DMERR("register failed %d\n", r);
 
-    stats_dir = kobject_create_and_add("stats", &THIS_MODULE->mkobj.kobj);
+    stat_kobj = kobject_create_and_add("stat", &THIS_MODULE->mkobj.kobj);
 
-    if (!stats_dir)
+    if (!stat_kobj)
         return -ENOMEM;
     
-    r = sysfs_create_file(stats_dir, &dmp_attr.attr);
+    r = sysfs_create_file(stat_kobj, &dmp_attr.attr);
     if (r < 0) 
-        DMERR("failed to create the volumes file"
-              "in /sys/modules/stats/volumes\n");
+        DMERR("failed to create the volumes file in /sys/modules/stat/volumes\n");
 
     return r;
 }
 
 void dm_dmp_exit(void)
 {
-    kobject_put(stats_dir);
+    kobject_put(stat_kobj);
+    sysfs_remove_file(stat_kobj, &dmp_attr.attr);
 	dm_unregister_target(&dmp_target);
 }
 
